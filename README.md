@@ -1,17 +1,17 @@
 A simple trading simulation relying on the RS-Indicator.
 --------------------------------------------------------
-Idea:
-  a) Buy the stock, if the RSI is below base line.
-  b) Sell the stock, if the RSI is above top line.
+Idea:<br/>
+  a) Buy the stock, if the RSI is below base line.<br/>
+  b) Sell the stock, if the RSI is above top line.<br/><br/>
 
-Further improvements:
-  I) Include transcation fees and spread costs
-  II) Include different strategies based on volatility and implied volatility
-  III) In case of indices: consider economic data for sentiment analysis
-  IV) Analysis of movements in option interest
-  V) Further optimization; simulating different parameters
+Further improvements:<br/>
+  I) Include transcation fees and spread costs<br/>
+  II) Include different strategies based on volatility and implied volatility<br/>
+  III) In case of indices: consider economic data for sentiment analysis<br/>
+  IV) Analysis of movements in option interest<br/>
+  V) Further optimization; simulating different parameters<br/><br/>
 
-Method for evaluating success and meaningfulness:
-  a) Backtesting with historical data
-  -> If it looks promissing: Evaluation and optimization
+Method for evaluating success and meaningfulness:<br/>
+  a) Backtesting with historical data<br/>
+  -> If it looks promissing: Evaluation and optimization<br/>
   b) Realword application with moderate funding
