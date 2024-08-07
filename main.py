@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 
-key = "eba7da3b24104ca594f061cb762cb8da"
+key = ""
 
 
 def get_closing_prices(ticker: str, interval=30):
