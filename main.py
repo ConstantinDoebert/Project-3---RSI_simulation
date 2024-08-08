@@ -81,7 +81,7 @@ def rsi(ticker: str):
     return df
 
 
-class PositionException(Exception):
+class OrderPositionException(Exception):
     "Raised when an order causes the position to be too much of total portfolio"
     pass
 
@@ -122,10 +122,10 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
             cash = temp_cash
             depot = temp_depot
         else:
-            raise PositionException
+            raise OrderPositionException
 
-    except PositionException:
-        print(f"Exception occured: {ticker} would be +{position_cap * 100}% of portfolio. \n Risk of underdiversification!")
+    except OrderPositionException:
+        print(f"Exception occured: {ticker} would be +{position_cap * 100}% of portfolio.\nRisk of underdiversification!")
     
 
     return cash, depot
