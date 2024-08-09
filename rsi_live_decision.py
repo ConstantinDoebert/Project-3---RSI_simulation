@@ -5,13 +5,6 @@ from datetime import datetime, timedelta, timezone
 import matplotlib.pyplot as plt
 import json
 
-
-def get_ny_time():
-    ny_date = (datetime.now(timezone.utc) - timedelta(hours=4))
-    ny_time = ny_date.time()
-    return ny_date, ny_time
-
-
 def get_price(ticker: str):
     """Pulls live price."""
     price_cache = {}
@@ -22,6 +15,13 @@ def get_price(ticker: str):
 
 
     return price_cache
+
+with open('key.json') as f:
+    key = json.load(f)["key"]
+ticker = "NVDA"
+cash = 5000 # amount of cash avaiable at t=0
+depot = 0 # number of shares at t=0
+total_value = cash + depot * float(get_price(ticker)[f"price of {ticker}"])
 
 def get_closing_prices(ticker: str, interval=30):
     """
@@ -89,6 +89,15 @@ def rsi(ticker: str):
     return df
 
 
+class OrderPositionException(Exception):
+    "Raised when an order causes the position to be too much of total portfolio."
+    pass
+
+class CountError(Exception):
+    "Raised when position enters short."
+    pass
+
+
 def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
     """
     1. Checks if today is weekday, because trades are (currently) only on weekdays possible between 9.30 and 16.00 New York Time.
@@ -99,7 +108,7 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
     """
     df = rsi(ticker)
     price = get_price(ticker)
-    ny_time = get_ny_time()[1]
+    ny_time = (datetime.now(timezone.utc) - timedelta(hours=4)).time()
     date_yesterday = datetime.today() - timedelta(1)
     trading_hours = trading_hours = ["09:30:00", "16:00:00"]
     is_weekday, is_intraday, buy = False, False, False
@@ -143,7 +152,7 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
         print(f"Exception occured: {ticker} would be +{position_cap * 100}% of portfolio.\nRisk of underdiversification!")
     
 
-    if not buy and is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 70:
+    if not buy and is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 40:
         try:
             if depot <= 0:
                 raise CountError
@@ -167,23 +176,5 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
         
     
     return round(df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"], 6), price[f"price of {ticker}"], cash, depot, temp_cash, temp_depot
-
-
-class OrderPositionException(Exception):
-    "Raised when an order causes the position to be too much of total portfolio."
-    pass
-
-class CountError(Exception):
-    "Raised when position enters short."
-    pass
-
-with open('key.json') as f:
-    key = json.load(f)["key"]
-
-ticker = input("Enter your ticker: ")
-
-cash = 5000 # amount of cash avaiable at t=0
-depot = 0 # number of shares at t=0
-total_value = cash + depot * float(get_price(ticker)[f"price of {ticker}"])
 
 print(simulator(ticker, cash, depot))
