@@ -1,15 +1,17 @@
 import requests as rq
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import matplotlib.pyplot as plt
 
 def get_price(ticker: str):
     """Pulls live price."""
     price_cache = {}
+
     price = rq.get(f"https://api.twelvedata.com/price?symbol={ticker}&apikey={key}")
     price_cache[f'price of {ticker}'] = float(price.json()["price"])
     price_cache["datetime"] = datetime.today()
+
 
     return price_cache
 
@@ -39,13 +41,16 @@ def get_closing_prices(ticker: str, interval=30):
         
     response = response.json()
 
+
     closing_prices, dates = ([], []) 
     for value in response["values"]:
         dates.append(value["datetime"])
         closing_prices.append(float(value["close"]))
 
+
     df = pd.DataFrame(closing_prices, dates).iloc[::-1]
     df.rename(columns={0: f"Last {interval} days closing"}, inplace=True)
+
 
     return df, interval
 
@@ -64,6 +69,7 @@ def rsi(ticker: str):
     df["U"] = 0.0
     df["D"] = 0.0
 
+
     for i in range(1, len(df)):
         # # see: https://en.wikipedia.org/wiki/Relative_strength_index#Calculation
         diff = df.iloc[i][f"Last {interval} days closing"] - df.iloc[i-1][f"Last {interval} days closing"]
@@ -72,11 +78,11 @@ def rsi(ticker: str):
         else:
             df.at[df.index[i], "D"] = abs(diff)
 
+
     df["EMA_U"] = df["U"].ewm(span=14, adjust=False).mean() # calculate exponential moving average
     df["EMA_D"] = df["D"].ewm(span=14, adjust=False).mean()
     df["RS"] = df["EMA_U"] / df["EMA_D"]
     df["RSI"] = 100 - 100 / (1 + df["RS"]) # see: https://en.wikipedia.org/wiki/Relative_strength_index#Calculation
-
 
     return df
 
@@ -89,26 +95,38 @@ class OrderPositionException(Exception):
 def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
     """
     1. Checks if today is weekday, because trades are (currently) only on weekdays possible between 9.30 and 16.00 New York Time.
-    2. Checks if its between 9.30 and 16.00 New York Time. Not done!!!
+    2. Checks if its between 9.30 and 16.00 New York Time.
     3. Checks if (yesterday's) RSI is below 30 for buy or above 70 for sell. Not complete!!!
     4. Checks if there's enough cash.
     5. Buys as much full shares possible up to maximum 5% of cash avaiable, if the total position is not more than 10% of entire portfolio <- maintaining diversification.
     """
     df = rsi(ticker)
     price = get_price(ticker)
-    date_yesterday= datetime.today() - timedelta(1)
-    is_weekday = False
-    buy = False
+    ny_time = (datetime.now(timezone.utc) - timedelta(hours=4)).time()
+    date_yesterday = datetime.today() - timedelta(1)
+    trading_hours = trading_hours = ["09:30:00", "16:00:00"]
+    is_weekday, is_intraday, buy = False, False, False
+
 
     if date_yesterday.weekday() != 5 and date_yesterday.weekday() != 6:
         is_weekday = True
+    else:
+        is_weekday = False
 
-    if df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] <= 30 and is_weekday:
+
+    if ny_time > datetime.strptime(trading_hours[0], "%H:%M:%S").time() and ny_time < datetime.strptime(trading_hours[1], "%H:%M:%S").time():
+        is_intraday = True
+    else:
+        is_intraday = False
+
+
+    if  is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] < 30:
         if price[f"price of {ticker}"] / cash <= 0.05:
             buy = True
         else:
             buy = False
     
+
     order_cap = np.floor(cash * buy_cap)
     temp_cash = cash
     temp_depot = depot
@@ -116,6 +134,9 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
         temp_cash -= order_cap / price[f"price of {ticker}"] * price[f"price of {ticker}"]
         temp_depot += np.floor(order_cap / price[f"price of {ticker}"])
 
+
+    if not buy and is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 70:
+        pass
     '''Overrides cash and depot values, if new position value is not more than 10% of total portfolio'''
     try:
         if temp_depot * price[f"price of {ticker}"] <= position_cap * (temp_cash + temp_depot * price[f"price of {ticker}"]):
@@ -128,6 +149,6 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
         print(f"Exception occured: {ticker} would be +{position_cap * 100}% of portfolio.\nRisk of underdiversification!")
     
 
-    return cash, depot
+    return cash, depot, date_yesterday
 
 print(simulator(ticker, cash, depot))
