@@ -1,6 +1,6 @@
 A simple trading simulation relying on the RS-Indicator.
 --------------------------------------------------------
-Open main.py for code.
+Open v1_backtest.py for most recent code.
 
 Idea:<br/>
   * Buy the stock, if the RSI is below base line.<br/>
