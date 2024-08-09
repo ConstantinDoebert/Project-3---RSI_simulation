@@ -1,9 +1,14 @@
-import requests as rq
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, timezone
-import matplotlib.pyplot as plt
+import requests as rq
 import json
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta, timezone
+import exchange_rate_converter as conv
+from apscheduler.schedulers import Scheduler
+
+
+
 
 # Enter desired ticker.
 ticker = input("Enter your ticker: ")
@@ -20,29 +25,49 @@ def get_ny_time():
     return ny_date, ny_time
 
 
+ny_datetime = get_ny_time()
+
+
 def get_price(ticker: str):
-    """Pulls live price."""
+    '''Pulls live price. Assumption: programm executes fast enough, so live price is very close to ny_datetime called above.'''
     price_cache = {}
 
     price = rq.get(f"https://api.twelvedata.com/price?symbol={ticker}&apikey={key}")
     price_cache[f'price of {ticker}'] = float(price.json()["price"])
-    price_cache["datetime"] = datetime.today()
+    price_cache["datetime"] = ny_datetime[0].strftime("%Y-%m-%d %H:%M:%S")
 
     # Reutrns dict with price and time.
     return price_cache
 
 
+current_price = get_price(ticker)
+
+
 # Backtests for approximately 100 trading days (7/5 correction).
 len_backtest = 100
+
 # Initial depost at t0. Currently 5000 USD.
-'''Add EUR/USD exchange rate functionality?'''
-cash = {(get_ny_time()[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 5000} 
-"""Problem!: set global time, so its uniform for each iteration!"""
+'''
+Important conception: py exe runs constantly in loop on server. 
+Creates cash, depot and order_book dict entry each tick <- each loop. Timedelta: one second is feasable.
+'''
+cash = {(ny_datetime[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 5000}
+
 # Initial shares at t0.
-depot = {(get_ny_time()[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 0}
+depot = {(ny_datetime[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 0}
+
+# Collection of prices bought and sold at.
+# Format: {"ny_datetime of executed order" = [price: float, buy: bool, sell: bool, buy_order: int, sell_order: int, gen_order: int]}
+order_book = {}
 total_value = {}
 for key in cash:
-    total_value[key] = cash[key] + depot[key] * 
+    total_value[key] = cash[key] + depot[key] * order_book[key] 
+
+
+# Converts total value of portfolio to desired currency, USD to EUR by default.
+total_value_converted = {}
+for key in total_value:
+    total_value_converted[key] = conv.convert_currency(total_value[key])
 
 
 def get_closing_prices(ticker: str, interval=len_backtest):
@@ -118,7 +143,7 @@ def rsi(ticker: str):
     return df
 
 
-def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
+def simulator(ticker: str, cash, depot, ny_datetime=ny_datetime, buy_cap=0.05, position_cap=0.1):
     """
     1. Checks if today is weekday, because trades are (currently) only on weekdays possible between 9.30 and 16.00 New York Time.
     2. Checks if its between 9.30 and 16.00 New York Time.
@@ -131,7 +156,6 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
     df = rsi(ticker)
     price = get_price(ticker)
 
-    ny_datetime = get_ny_time()
     ny_date = ny_datetime[0].strftime("%Y-%m-%d")
     ny_time = ny_datetime[1]
     date_yesterday = datetime.today() - timedelta(1)
@@ -191,7 +215,7 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
     if not buy and is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 70:
         try:
             if depot <= 0:
-                # Can't sell what you don't have :) (yet). Safety measure. Should never be thrown in 1st place (yet).
+                # Can't sell what you don't have :) (yet). Safety measure. Should never be thrown in 1st place.
                 raise CountError
             else:
                 pass
@@ -226,5 +250,12 @@ class CountError(Exception):
     pass
 
 
+sched = Scheduler()
+sched.start()
 
-print(simulator(ticker, cash, depot))
+def run_backtest(ticker, cash, depot):
+    print("Start with backtest.")
+    print(simulator(ticker, cash, depot))
+    print("Backtest successful.")
+
+sched.add_interval_job(run_backtest, seconds = 20)
