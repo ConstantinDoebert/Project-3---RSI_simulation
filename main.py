@@ -15,7 +15,7 @@ def get_price(ticker: str):
 
     return price_cache
 
-key = ""
+key = "eba7da3b24104ca594f061cb762cb8da"
 ticker = "NVDA"
 cash = 5000 # amount of cash avaiable at t=0
 depot = 0 # number of shares at t=0
@@ -88,7 +88,11 @@ def rsi(ticker: str):
 
 
 class OrderPositionException(Exception):
-    "Raised when an order causes the position to be too much of total portfolio"
+    "Raised when an order causes the position to be too much of total portfolio."
+    pass
+
+class CountError(Exception):
+    "Raised when position enters short."
     pass
 
 
@@ -134,9 +138,6 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
         temp_cash -= order_cap / price[f"price of {ticker}"] * price[f"price of {ticker}"]
         temp_depot += np.floor(order_cap / price[f"price of {ticker}"])
 
-
-    if not buy and is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 70:
-        pass
     '''Overrides cash and depot values, if new position value is not more than 10% of total portfolio'''
     try:
         if temp_depot * price[f"price of {ticker}"] <= position_cap * (temp_cash + temp_depot * price[f"price of {ticker}"]):
@@ -149,6 +150,29 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
         print(f"Exception occured: {ticker} would be +{position_cap * 100}% of portfolio.\nRisk of underdiversification!")
     
 
-    return cash, depot, date_yesterday
+    if not buy and is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 40:
+        try:
+            if depot <= 0:
+                raise CountError
+            else:
+                pass
+
+            temp_depot -= depot
+            temp_cash += depot * price[f"price of {ticker}"]
+
+            if temp_depot != 0:
+                raise CountError
+            else:
+                pass
+
+            depot = temp_depot
+            cash = temp_cash
+            
+        
+        except CountError:
+            print("Expection occured: Didn't sell all shares or enters short position. No shorting possible.")
+        
+    
+    return round(df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"], 6), price[f"price of {ticker}"], cash, depot, temp_cash, temp_depot
 
 print(simulator(ticker, cash, depot))
