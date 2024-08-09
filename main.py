@@ -15,7 +15,7 @@ def get_price(ticker: str):
 
     return price_cache
 
-key = "eba7da3b24104ca594f061cb762cb8da"
+key = ""
 ticker = "NVDA"
 cash = 5000 # amount of cash avaiable at t=0
 depot = 0 # number of shares at t=0
@@ -167,7 +167,7 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
 
             depot = temp_depot
             cash = temp_cash
-            
+
         
         except CountError:
             print("Expection occured: Didn't sell all shares or enters short position. No shorting possible.")
