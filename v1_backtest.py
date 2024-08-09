@@ -36,7 +36,8 @@ def get_price(ticker: str):
 len_backtest = 100
 # Initial depost at t0. Currently 5000 USD.
 '''Add EUR/USD exchange rate functionality?'''
-cash = {(get_ny_time()[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 5000}
+cash = {(get_ny_time()[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 5000} 
+"""Problem!: set global time, so its uniform for each iteration!"""
 # Initial shares at t0.
 depot = {(get_ny_time()[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 0}
 total_value = {}
@@ -129,11 +130,15 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
     """
     df = rsi(ticker)
     price = get_price(ticker)
-    ny_time = get_ny_time()[1]
+
+    ny_datetime = get_ny_time()
+    ny_date = ny_datetime[0].strftime("%Y-%m-%d")
+    ny_time = ny_datetime[1]
     date_yesterday = datetime.today() - timedelta(1)
     trading_hours = ["09:30:00", "16:00:00"]
-    is_weekday, is_intraday, buy = False, False, False
 
+    is_weekday, is_intraday, buy = False, False, False
+    date_bought, date_sold = ({}, {})
 
     # Checks if today is weekday.
     if date_yesterday.weekday() != 5 and date_yesterday.weekday() != 6:
@@ -171,6 +176,7 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
         if temp_depot * price[f"price of {ticker}"] <= position_cap * (temp_cash + temp_depot * price[f"price of {ticker}"]):
             cash = temp_cash
             depot = temp_depot
+            date_bought[ny_date] = price[f"price of {ticker}"] # add count variables for buy, sell and general orders
         else:
             # Throws position cap warning.
             raise OrderPositionException
@@ -185,13 +191,14 @@ def simulator(ticker: str, cash, depot, buy_cap=0.05, position_cap=0.1):
     if not buy and is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 70:
         try:
             if depot <= 0:
-                # Can't sell what you don't have :). Safety measure. Should never be thrown in 1st place.
+                # Can't sell what you don't have :) (yet). Safety measure. Should never be thrown in 1st place (yet).
                 raise CountError
             else:
                 pass
 
             temp_depot -= depot
             temp_cash += depot * price[f"price of {ticker}"]
+            date_sold[ny_date] = price[f"price of {ticker}"] # add count variables for buy, sell and general orders
 
             if temp_depot != 0:
                 raise CountError
