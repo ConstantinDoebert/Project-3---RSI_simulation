@@ -9,7 +9,7 @@ with open('key.json') as f:
 def convert_currency(amount: float, currency_from="USD", currency_to="EUR") -> float:
     '''
     Converts monetary value to desired currency value. By default USD to EUR.\n
-    Import currency codes:\n
+    Most relevant currency codes:\n
         USD - U.S. Dollar\n
         EUR - Euro\n
         GBP - Great Britain pound (sterling)\n
@@ -23,7 +23,7 @@ def convert_currency(amount: float, currency_from="USD", currency_to="EUR") -> f
         BZR - Brazilian real\n
         SEK - Swedish krona\n
         ZAR - South African rand\n
-        HKD - Hong Kong dollar\n
+        HKD - Hong Kong dollar
     '''
     info = rq.get(f"https://api.twelvedata.com/currency_conversion?symbol={currency_from}/{currency_to}&amount={amount}&apikey={key}").json()
     converted_amount = info['amount']

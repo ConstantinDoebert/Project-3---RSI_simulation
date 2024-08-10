@@ -5,13 +5,12 @@ import json
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta, timezone
 import exchange_rate_converter as conv
-from apscheduler.schedulers import Scheduler
 
 
 
 
 # Enter desired ticker.
-ticker = input("Enter your ticker: ")
+ticker = "NVDA"
 
 # Loads api key from file for safety reasons.
 with open('key.json') as f:
@@ -56,6 +55,7 @@ cash = {(ny_datetime[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%
 # Initial shares at t0.
 depot = {(ny_datetime[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 0}
 
+
 # Collection of prices bought and sold at.
 # Format: {"ny_datetime of executed order" = [price: float, buy: bool, sell: bool, buy_order: int, sell_order: int, gen_order: int]}
 order_book = {}
@@ -64,17 +64,21 @@ for key in cash:
     total_value[key] = cash[key] + depot[key] * order_book[key] 
 
 
+
 # Converts total value of portfolio to desired currency, USD to EUR by default.
-total_value_converted = {}
-for key in total_value:
-    total_value_converted[key] = conv.convert_currency(total_value[key])
+def get_converted_portfolio(total_value):
+    total_value_converted = {}
+    for key in total_value:
+        total_value_converted[key] = conv.convert_currency(total_value[key])
+
+    return total_value_converted
 
 
 def get_closing_prices(ticker: str, interval=len_backtest):
     """
     Get closing prices of recent trading days. Specified in var: len_backtests
     """
-    date_today = datetime.today().date() # End date of time series.
+    date_today = ny_datetime[0].date() # End date of time series.
     start_date = date_today - timedelta(np.ceil(interval * 7/5)) # Adjusting delta for trading days; 5 out of 7 days.
 
     response = rq.get(
@@ -99,10 +103,58 @@ def get_closing_prices(ticker: str, interval=len_backtest):
 
     # Fixes order to logical order: from top-to-bottom.
     df = pd.DataFrame(closing_prices, dates).iloc[::-1]
-    df.rename(columns={0: f"Last {interval} days closing"}, inplace=True)
+    df.rename(columns={0: f"Last {len(df.index)} days closing"}, inplace=True)
 
 
     return df, interval
+
+
+
+def get_intraday_prices(ticker: str, interval=len_backtest):
+    """
+    Get intraday prices of recent trading days. Specified in var: len_backtests.\n
+    Average
+    """
+    date_today = ny_datetime[0].date() # End date of time series.
+    start_date = date_today - timedelta(np.ceil(interval * 7/5)) # Adjusting delta for trading days; 5 out of 7 days.
+
+    response = rq.get(
+            f"https://api.twelvedata.com/time_series",
+            params={
+                "symbol": ticker,
+                "interval": "1h",
+                "apikey": key,
+                "start_date": start_date.strftime("%Y-%m-%d"),
+                "end_date": date_today.strftime("%Y-%m-%d"),
+            }
+        )
+        
+    response = response.json()
+
+    closing_prices, dates = ([], []) 
+    for value in response["values"]:
+        dates.append(value["datetime"])
+        closing_prices.append(float(value["close"]))
+
+
+    # Fixes order to logical order: from top-to-bottom.
+    df = pd.DataFrame(closing_prices, dates).iloc[::-1]
+    df.rename(columns={0: f"Last {len(df.index)} full hour prices."}, inplace=True)
+
+
+    return df
+
+
+
+def calc_intra_average(ticker: str):
+    df = get_intraday_prices(ticker)
+
+    df.index = pd.to_datetime(df.index)
+    df_daily_mean = df.groupby(df.index.date).mean()
+    df_daily_mean.index = pd.to_datetime(df_daily_mean.index)
+
+    return df_daily_mean
+
 
 
 def plot_values(ticker: str):
@@ -110,6 +162,7 @@ def plot_values(ticker: str):
     df = get_closing_prices(ticker)
     plt.plot(df)
     plt.show()
+
 
 
 def rsi(ticker: str):
@@ -126,7 +179,7 @@ def rsi(ticker: str):
 
     for i in range(1, len(df)):
         # See: https://en.wikipedia.org/wiki/Relative_strength_index#Calculation.
-        diff = df.iloc[i][f"Last {interval} days closing"] - df.iloc[i-1][f"Last {interval} days closing"]
+        diff = df.iloc[i][f"Last {len(df.index)} days closing"] - df.iloc[i-1][f"Last {len(df.index)} days closing"]
         if diff > 0:
             df.at[df.index[i], "U"] = diff
         else:
@@ -143,6 +196,7 @@ def rsi(ticker: str):
     return df
 
 
+
 def simulator(ticker: str, cash, depot, ny_datetime=ny_datetime, buy_cap=0.05, position_cap=0.1):
     """
     1. Checks if today is weekday, because trades are (currently) only on weekdays possible between 9.30 and 16.00 New York Time.
@@ -153,12 +207,13 @@ def simulator(ticker: str, cash, depot, ny_datetime=ny_datetime, buy_cap=0.05, p
 
     6. Add safety measure in case of high volatility. +/- 2 standard deviations from CBOE:VIX?
     """
-    df = rsi(ticker)
+    df_rsi = rsi(ticker)
+    df_intraday = calc_intra_average(ticker)
     price = get_price(ticker)
 
     ny_date = ny_datetime[0].strftime("%Y-%m-%d")
     ny_time = ny_datetime[1]
-    date_yesterday = datetime.today() - timedelta(1)
+    date_yesterday = ny_datetime[0] - timedelta(1)
     trading_hours = ["09:30:00", "16:00:00"]
 
     is_weekday, is_intraday, buy = False, False, False
@@ -179,12 +234,13 @@ def simulator(ticker: str, cash, depot, ny_datetime=ny_datetime, buy_cap=0.05, p
 
 
     # Returns buy signal.
-    if  is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] < 30:
+    if  is_weekday and is_intraday and df_rsi.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] < 30:
         if price[f"price of {ticker}"] / cash <= 0.05: # First buy cap safety measure.
             buy = True
         else:
             buy = False
     
+
 
     order_cap = np.floor(cash * buy_cap) # Initiates second buy cap safety measure.
     temp_cash = cash
@@ -212,7 +268,7 @@ def simulator(ticker: str, cash, depot, ny_datetime=ny_datetime, buy_cap=0.05, p
     # Checks and executes sell order.
     # All shares will be dumped.
     # Future adjustment possible for average down effect.
-    if not buy and is_weekday and is_intraday and df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 70:
+    if not buy and is_weekday and is_intraday and df_rsi.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 70:
         try:
             if depot <= 0:
                 # Can't sell what you don't have :) (yet). Safety measure. Should never be thrown in 1st place.
@@ -237,7 +293,9 @@ def simulator(ticker: str, cash, depot, ny_datetime=ny_datetime, buy_cap=0.05, p
             print("Expection occured: Didn't sell all shares or enters short position. No shorting possible.")
         
     
-    return round(df.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"], 6), price[f"price of {ticker}"], cash, depot, temp_cash, temp_depot
+    return round(df_rsi.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"], 6), price[f"price of {ticker}"]
+
+
 
 
 class OrderPositionException(Exception):
@@ -245,17 +303,8 @@ class OrderPositionException(Exception):
     pass
 
 
+
 class CountError(Exception):
     "Raised when position enters short."
     pass
 
-
-sched = Scheduler()
-sched.start()
-
-def run_backtest(ticker, cash, depot):
-    print("Start with backtest.")
-    print(simulator(ticker, cash, depot))
-    print("Backtest successful.")
-
-sched.add_interval_job(run_backtest, seconds = 20)
