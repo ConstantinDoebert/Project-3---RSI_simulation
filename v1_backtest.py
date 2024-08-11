@@ -27,7 +27,7 @@ def get_ny_time():
 ny_datetime = get_ny_time()
 
 
-def get_price(ticker: str):
+def get_price():
     '''Pulls live price. Assumption: programm executes fast enough, so live price is very close to ny_datetime called above.'''
     price_cache = {}
 
@@ -39,11 +39,11 @@ def get_price(ticker: str):
     return price_cache
 
 
-current_price = get_price(ticker)
+current_price = get_price()
 
 
 # Backtests for approximately 100 trading days (7/5 correction).
-len_backtest = 100
+len_backtest = 300
 
 
 
@@ -57,12 +57,12 @@ def get_converted_portfolio(total_value):
 
 
 
-def get_closing_prices(ticker: str, interval=len_backtest):
+def get_closing_prices():
     """
     Get closing prices of recent trading days. Specified in var: len_backtests
     """
     date_today = ny_datetime[0].date() # End date of time series.
-    start_date = date_today - timedelta(np.ceil(interval * 7/5)) # Adjusting delta for trading days; 5 out of 7 days.
+    start_date = date_today - timedelta(np.ceil(len_backtest * 7/5)) # Adjusting delta for trading days; 5 out of 7 days.
 
     response = rq.get(
             f"https://api.twelvedata.com/time_series",
@@ -89,17 +89,17 @@ def get_closing_prices(ticker: str, interval=len_backtest):
     df.rename(columns={0: f"Last {len(df.index)} days closing"}, inplace=True)
 
 
-    return df, interval
+    return df, len_backtest
 
 
 
-def get_intraday_prices(ticker: str, interval=len_backtest):
+def get_intraday_prices():
     """
     Get intraday prices of recent trading days. Specified in var: len_backtests.\n
     Average
     """
     date_today = ny_datetime[0].date() # End date of time series.
-    start_date = date_today - timedelta(np.ceil(interval * 7/5)) # Adjusting delta for trading days; 5 out of 7 days.
+    start_date = date_today - timedelta(np.ceil(len_backtest * 7/5)) # Adjusting delta for trading days; 5 out of 7 days.
 
     response = rq.get(
             f"https://api.twelvedata.com/time_series",
@@ -129,8 +129,8 @@ def get_intraday_prices(ticker: str, interval=len_backtest):
 
 
 
-def calc_intra_average(ticker: str):
-    df = get_intraday_prices(ticker)
+def calc_intra_average():
+    df = get_intraday_prices()
 
     df.index = pd.to_datetime(df.index)
     df_daily_mean = df.groupby(df.index.date).mean()
@@ -141,7 +141,7 @@ def calc_intra_average(ticker: str):
 
 
 
-def plot_values(ticker: str):
+def plot_values():
     '''Plots closing prices.'''
     df = get_closing_prices(ticker)
     plt.plot(df)
@@ -149,11 +149,11 @@ def plot_values(ticker: str):
 
 
 
-def rsi(ticker: str):
+def rsi():
     '''
     Calculates Relative-Strength-Indicator for given set of closing prices. See Wikipedia for detailed calculation.
     '''
-    closing_prices = get_closing_prices(ticker)
+    closing_prices = get_closing_prices()
     df = closing_prices[0]
     interval = closing_prices[1]
 
@@ -181,13 +181,13 @@ def rsi(ticker: str):
 
 
 
-def simulator(ticker: str, buy_cap=0.05, position_cap=0.1):
+def simulator(buy_cap=0.05, position_cap=0.1):
     """
     - Add safety measure in case of high volatility. +/- 2 standard deviations from CBOE:VIX?
     """
-    df_rsi = rsi(ticker)
+    df_rsi = rsi()
     df_rsi.index = pd.to_datetime(df_rsi.index)
-    df_intraday = calc_intra_average(ticker)
+    df_intraday = calc_intra_average()
     df_merged = pd.DataFrame()
 
     
@@ -289,7 +289,7 @@ def simulator(ticker: str, buy_cap=0.05, position_cap=0.1):
 
 
 
-def plot_mean_and_portfolio(ticker: str):
+def plot_mean_and_portfolio():
     df = simulator(ticker)
     # Create a plot with two y-axes
     fig, ax1 = plt.subplots(figsize=(14, 8))
@@ -315,7 +315,23 @@ def plot_mean_and_portfolio(ticker: str):
 
 
 
-plot_mean_and_portfolio(ticker)
+def analyze_returns():
+    df = simulator(ticker)
+
+    return df.describe(percentiles=[.25, .5, .75], include="all")
+
+
+
+def export_df_excel():
+    df = simulator(ticker)
+
+    return df.to_excel(f"RSI of {ticker}.xlsx")
+
+
+
+print(analyze_returns())
+export_df_excel()
+plot_mean_and_portfolio()
 
 
 
