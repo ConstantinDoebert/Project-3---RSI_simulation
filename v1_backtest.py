@@ -45,24 +45,6 @@ current_price = get_price(ticker)
 # Backtests for approximately 100 trading days (7/5 correction).
 len_backtest = 100
 
-# Initial depost at t0. Currently 5000 USD.
-'''
-Important conception: py exe runs constantly in loop on server. 
-Creates cash, depot and order_book dict entry each tick <- each loop. Timedelta: one second is feasable.
-'''
-cash = {(ny_datetime[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 5000}
-
-# Initial shares at t0.
-depot = {(ny_datetime[0] - timedelta(len_backtest * 7/5)).strftime("%Y-%m-%d %H:%M:%S"): 0}
-
-
-# Collection of prices bought and sold at.
-# Format: {"ny_datetime of executed order" = [price: float, buy: bool, sell: bool, buy_order: int, sell_order: int, gen_order: int]}
-order_book = {}
-total_value = {}
-for key in cash:
-    total_value[key] = cash[key] + depot[key] * order_book[key] 
-
 
 
 # Converts total value of portfolio to desired currency, USD to EUR by default.
@@ -72,6 +54,7 @@ def get_converted_portfolio(total_value):
         total_value_converted[key] = conv.convert_currency(total_value[key])
 
     return total_value_converted
+
 
 
 def get_closing_prices(ticker: str, interval=len_backtest):
@@ -152,6 +135,7 @@ def calc_intra_average(ticker: str):
     df.index = pd.to_datetime(df.index)
     df_daily_mean = df.groupby(df.index.date).mean()
     df_daily_mean.index = pd.to_datetime(df_daily_mean.index)
+    df_daily_mean.columns = ['Mean of trading days']
 
     return df_daily_mean
 
@@ -197,104 +181,147 @@ def rsi(ticker: str):
 
 
 
-def simulator(ticker: str, cash, depot, ny_datetime=ny_datetime, buy_cap=0.05, position_cap=0.1):
+def simulator(ticker: str, buy_cap=0.05, position_cap=0.1):
     """
-    1. Checks if today is weekday, because trades are (currently) only on weekdays possible between 9.30 and 16.00 New York Time.
-    2. Checks if its between 9.30 and 16.00 New York Time.
-    3. Checks if (yesterday's) RSI is below 30 for buy or above 70 for sell. Not complete!!!
-    4. Checks if there's enough cash.
-    5. Buys as much full shares possible up to maximum 5% of cash avaiable, if the total position is not more than 10% of entire portfolio <- maintaining diversification.
-
-    6. Add safety measure in case of high volatility. +/- 2 standard deviations from CBOE:VIX?
+    - Add safety measure in case of high volatility. +/- 2 standard deviations from CBOE:VIX?
     """
     df_rsi = rsi(ticker)
+    df_rsi.index = pd.to_datetime(df_rsi.index)
     df_intraday = calc_intra_average(ticker)
-    price = get_price(ticker)
+    df_merged = pd.DataFrame()
 
-    ny_date = ny_datetime[0].strftime("%Y-%m-%d")
-    ny_time = ny_datetime[1]
-    date_yesterday = ny_datetime[0] - timedelta(1)
-    trading_hours = ["09:30:00", "16:00:00"]
-
-    is_weekday, is_intraday, buy = False, False, False
-    date_bought, date_sold = ({}, {})
-
-    # Checks if today is weekday.
-    if date_yesterday.weekday() != 5 and date_yesterday.weekday() != 6:
-        is_weekday = True
-    else:
-        is_weekday = False
-
-
-    # Checks if its within NYSE trading hours.
-    if ny_time > datetime.strptime(trading_hours[0], "%H:%M:%S").time() and ny_time < datetime.strptime(trading_hours[1], "%H:%M:%S").time():
-        is_intraday = True
-    else:
-        is_intraday = False
-
-
-    # Returns buy signal.
-    if  is_weekday and is_intraday and df_rsi.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] < 30:
-        if price[f"price of {ticker}"] / cash <= 0.05: # First buy cap safety measure.
-            buy = True
-        else:
-            buy = False
     
-
-
-    order_cap = np.floor(cash * buy_cap) # Initiates second buy cap safety measure.
-    temp_cash = cash
-    temp_depot = depot
-    # Executes buy order.
-    if buy and order_cap > price[f"price of {ticker}"]:
-        temp_cash -= order_cap / price[f"price of {ticker}"] * price[f"price of {ticker}"]
-        temp_depot += np.floor(order_cap / price[f"price of {ticker}"])
-
-    # Checks third safety measure.
-    '''Overrides cash and depot values, if new position value is not more than 10% of total portfolio'''
     try:
-        if temp_depot * price[f"price of {ticker}"] <= position_cap * (temp_cash + temp_depot * price[f"price of {ticker}"]):
-            cash = temp_cash
-            depot = temp_depot
-            date_bought[ny_date] = price[f"price of {ticker}"] # add count variables for buy, sell and general orders
+        # Check if indices are equal
+        if df_rsi.index.equals(df_intraday.index):
+            # Merge dataframes
+            df_merged = pd.concat([df_rsi, df_intraday], axis=1)
         else:
-            # Throws position cap warning.
-            raise OrderPositionException
-
-    except OrderPositionException:
-        print(f"Exception occured: {ticker} would be +{position_cap * 100}% of portfolio.\nRisk of underdiversification!")
+            raise UnequalIndexError
     
+    except UnequalIndexError:
+        print("Please adjust indices.")
 
-    # Checks and executes sell order.
-    # All shares will be dumped.
-    # Future adjustment possible for average down effect.
-    if not buy and is_weekday and is_intraday and df_rsi.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"] > 70:
-        try:
-            if depot <= 0:
-                # Can't sell what you don't have :) (yet). Safety measure. Should never be thrown in 1st place.
-                raise CountError
-            else:
-                pass
 
-            temp_depot -= depot
-            temp_cash += depot * price[f"price of {ticker}"]
-            date_sold[ny_date] = price[f"price of {ticker}"] # add count variables for buy, sell and general orders
+    df_merged['Buy'] = (df_merged['RSI'] >= 10) & (df_merged['RSI'] <= 30)
+    df_merged['Sell'] = df_merged['RSI'] > 70
 
-            if temp_depot != 0:
-                raise CountError
-            else:
-                pass
+    buy_order_counter = 0
+    sell_order_counter = 0
+    general_order_counter = 0
 
-            depot = temp_depot
-            cash = temp_cash
-            
+    # Create empty lists to hold the order values
+    buy_orders = []
+    sell_orders = []
+    general_orders = []
+
+    # Iterate through each row in the DataFrame
+    for i, row in df_merged.iterrows():
+        # Handle Buy order
+        if row['Buy']:
+            buy_order_counter += 1
+            buy_orders.append(buy_order_counter)
+        else:
+            buy_orders.append(np.nan)
         
-        except CountError:
-            print("Expection occured: Didn't sell all shares or enters short position. No shorting possible.")
+        # Handle Sell order
+        if row['Sell']:
+            sell_order_counter += 1
+            sell_orders.append(sell_order_counter)
+        else:
+            sell_orders.append(np.nan)
         
-    
-    return round(df_rsi.at[date_yesterday.date().strftime('%Y-%m-%d'), "RSI"], 6), price[f"price of {ticker}"]
+        # Handle General order
+        if row['Buy'] or row['Sell']:
+            general_order_counter += 1
+            general_orders.append(general_order_counter)
+        else:
+            general_orders.append(np.nan)
 
+    # Add the new columns to the DataFrame
+    df_merged['Buy order'] = buy_orders
+    df_merged['Sell order'] = sell_orders
+    df_merged['General order'] = general_orders
+
+    df_merged['cash'] = np.nan
+    df_merged['depot'] = np.nan
+    df_merged['portfolio'] = np.nan
+
+    # Set initial values for cash and depot starting from the 11th row (index 10)
+    df_merged.at[df_merged.index[10], 'cash'] = 100000
+    df_merged.at[df_merged.index[10], 'depot'] = 0
+
+    # Iterate over the rows starting from the 12th row
+    for i in range(11, len(df_merged)):
+        previous_row = df_merged.iloc[i - 1]
+        current_row = df_merged.iloc[i]
+
+        if current_row['Buy']:
+            # Calculate how many times Mean of trading days fits into the cash value
+            units_to_buy = np.floor(previous_row['cash'] / current_row['Mean of trading days'])
+
+            # Update depot with the number of units bought
+            df_merged.at[df_merged.index[i], 'depot'] = previous_row['depot'] + units_to_buy
+
+            # Update cash after buying
+            df_merged.at[df_merged.index[i], 'cash'] = previous_row['cash'] - (units_to_buy * current_row['Mean of trading days'])
+
+        elif current_row['Sell']:
+            # Calculate cash after selling all depot units
+            cash_after_sell = previous_row['cash'] + (previous_row['depot'] * current_row['Mean of trading days'])
+
+            # Update cash
+            df_merged.at[df_merged.index[i], 'cash'] = cash_after_sell
+
+            # Update depot to 0 after selling
+            df_merged.at[df_merged.index[i], 'depot'] = 0
+
+        else:
+            # If neither Buy nor Sell, carry forward the previous cash and depot values
+            df_merged.at[df_merged.index[i], 'cash'] = previous_row['cash']
+            df_merged.at[df_merged.index[i], 'depot'] = previous_row['depot']
+
+        # Update the portfolio value (cash + depot * Mean of trading days)
+        df_merged.at[df_merged.index[i], 'portfolio'] = df_merged.at[df_merged.index[i], 'cash'] + (df_merged.at[df_merged.index[i], 'depot'] * current_row['Mean of trading days'])
+
+
+    return df_merged
+
+
+
+def plot_mean_and_portfolio(ticker: str):
+    df = simulator(ticker)
+    # Create a plot with two y-axes
+    fig, ax1 = plt.subplots(figsize=(14, 8))
+
+    # Plot "Portfolio" on the first y-axis
+    ax1.plot(df.index, df['portfolio'], color='blue', label='Portfolio')
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Portfolio', color='blue')
+    ax1.tick_params(axis='y', labelcolor='blue')
+
+    # Create a second y-axis to plot "Mean of trading days"
+    ax2 = ax1.twinx()
+    ax2.plot(df.index, df['Mean of trading days'], color='green', label='Mean of trading days')
+    ax2.set_ylabel('Mean of trading days', color='green')
+    ax2.tick_params(axis='y', labelcolor='green')
+
+    # Adding title and grid
+    plt.title('Portfolio and Mean of Trading Days Over Time')
+    ax1.grid(True)
+
+    # Show plot
+    plt.show()
+
+
+
+plot_mean_and_portfolio(ticker)
+
+
+
+class UnequalIndexError(Exception):
+    "Raised when to dataframe indices don't match."
+    pass
 
 
 
