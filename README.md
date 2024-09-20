@@ -16,5 +16,3 @@ Further improvements:<br/>
 
 Methods for evaluating success and meaningfulness:<br/>
   * Backtesting with historical data.<br/>
-  -> If it looks promissing: Evaluation and optimization.<br/>
-  * Realworld application with funding or paper trading.
